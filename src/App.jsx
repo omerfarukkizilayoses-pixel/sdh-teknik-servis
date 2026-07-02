@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Wrench, CheckCircle, Calendar, PlusCircle, Search, MessageSquare, ShieldAlert } from 'lucide-react';
+import { Wrench, CheckCircle, Calendar, PlusCircle, Search, MessageSquare, ShieldAlert, Loader2 } from 'lucide-react';
+
+// ==========================================
+// 🔑 GİST VE TOKEN BAĞLANTILARI
+// ==========================================
+// NOT: BURADAKİ RECO_TOKEN ALANINA KENDİ ALDIĞIN ghp_ ILE BAŞLAYAN ŞİFREYİ YAPIŞTIR
+const GITHUB_TOKEN = "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"; 
+const GIST_ID = "6c81b83ef7f3bba7144b922a2a99ccbf";
+const GIST_FILENAME = "sdh_data.json";
 
 function App() {
-  // LocalStorage Entegrasyonu
-  const [servisVerisi, setServisVerisi] = useState(() => {
-    const lokalData = localStorage.getItem('sdh_servis_kayitlari');
-    return lokalData ? JSON.parse(lokalData) : {};
-  });
-
-  // Ekran Genişliği Takibi (Responsive Yapı İçin)
+  const [servisVerisi, setServisVerisi] = useState({});
+  const [loading, setLoading] = useState(true);
   const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
 
+  // Responsive Ekran Genişliği Takibi
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener('resize', handleResize);
@@ -32,43 +36,87 @@ function App() {
   const [sorguSeriNo, setSorguSeriNo] = useState('');
   const [sorguSonucu, setSorguSonucu] = useState(null);
 
-  // URL'den Otomatik Karekod Sorgulama Algılayıcı (Telefon Kamerası İçin)
+  // GitHub Gist Bulutundan Verileri Çekme Fonksiyonu
+  const verileriGisttenCek = async (targetSeriNo = null) => {
+    try {
+      setLoading(true);
+      const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+        headers: { Authorization: `token ${GITHUB_TOKEN}` }
+      });
+      const data = await res.json();
+      const dosyaIcerigi = data.files[GIST_FILENAME].content;
+      const parsedData = JSON.parse(dosyaIcerigi || '{}');
+      
+      setServisVerisi(parsedData);
+
+      // URL'den veya tetikleyiciden gelen bir seri no sorgusu varsa doğrudan sonuç panelini doldur
+      if (targetSeriNo) {
+        const temizNo = targetSeriNo.toUpperCase().trim();
+        if (parsedData[temizNo]) {
+          setSorguSonucu(parsedData[temizNo]);
+        }
+      }
+      return parsedData;
+    } catch (error) {
+      console.error("Veri çekme hatası:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Sayfa İlk Açıldığında ve Telefon Kamerası / URL Tetiklemelerinde Çalışacak Alan
   useEffect(() => {
     const queryParams = new URLSearchParams(window.location.search);
     const urlSeriNo = queryParams.get('serino');
+    
     if (urlSeriNo) {
-      const temizUrlSeriNo = urlSeriNo.toUpperCase().trim();
       setActiveTab('sorgula');
-      setSorguSeriNo(temizUrlSeriNo);
-      
-      const lokalData = localStorage.getItem('sdh_servis_kayitlari');
-      if (lokalData) {
-        const data = JSON.parse(lokalData);
-        if (data[temizUrlSeriNo]) {
-          setSorguSonucu(data[temizUrlSeriNo]);
-        }
-      }
+      setSorguSeriNo(urlSeriNo.toUpperCase().trim());
+      verileriGisttenCek(urlSeriNo);
+    } else {
+      verileriGisttenCek();
     }
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem('sdh_servis_kayitlari', JSON.stringify(servisVerisi));
-  }, [servisVerisi]);
+  // Güncellenen Veriyi Gist Bulutuna Gönderme Fonksiyonu
+  const veriyiGisteKaydet = async (guncelData) => {
+    try {
+      await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `token ${GITHUB_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          files: {
+            [GIST_FILENAME]: {
+              content: JSON.stringify(guncelData, null, 2)
+            }
+          }
+        })
+      });
+    } catch (error) {
+      console.error("Gist kaydetme hatası:", error);
+      alert("Bulut veritabanına kaydedilirken bir hata oluştu!");
+    }
+  };
 
-  // Sayaçlar
+  // İstatistik Sayaçları
   const toplamCihaz = Object.keys(servisVerisi).length;
   const parcaDegisenSayisi = Object.values(servisVerisi).reduce((acc, cihaz) => {
-    const hasParca = cihaz.islemler.some(i => i.parcalar && i.parcalar.length > 0);
+    const hasParca = cihaz.islemler && cihaz.islemler.some(i => i.parcalar && i.parcalar.length > 0);
     return hasParca ? acc + 1 : acc;
   }, 0);
 
-  const handleKaydet = (e) => {
+  // Rapor Kaydetme Buton Tetikleyicisi
+  const handleKaydet = async (e) => {
     e.preventDefault();
     if (!cihazSeriNo || !servisAdi) {
       alert("Lütfen İlgili Birim ve Seri No alanlarını doldurun!");
       return;
     }
 
+    setLoading(true);
     const temizSeriNo = cihazSeriNo.toUpperCase().trim();
     const parcaListesi = degisenParcalar.split('\n').map(p => p.trim()).filter(p => p !== '');
 
@@ -78,28 +126,36 @@ function App() {
       parcalar: parcaListesi
     };
 
-    setServisVerisi(prev => {
-      const guncel = { ...prev };
-      if (guncel[temizSeriNo]) {
-        guncel[temizSeriNo].islemler = [yeniIslem, ...guncel[temizSeriNo].islemler];
-        guncel[temizSeriNo].servis_adi = servisAdi;
-        guncel[temizSeriNo].telefon = telefon;
-        guncel[temizSeriNo].cihaz_model = cihazModel;
-      } else {
-        guncel[temizSeriNo] = {
-          servis_adi: servisAdi,
-          telefon: telefon,
-          cihaz_model: cihazModel,
-          islemler: [yeniIslem]
-        };
-      }
-      return guncel;
-    });
+    // Kaydetmeden önce en güncel bulut verisini çekip üstüne ekliyoruz (Veri kaybını önlemek için)
+    const anlikBulutVerisi = await verileriGisttenCek();
+    
+    const guncel = { ...anlikBulutVerisi };
+    if (guncel[temizSeriNo]) {
+      guncel[temizSeriNo].islemler = [yeniIslem, ...(guncel[temizSeriNo].islemler || [])];
+      guncel[temizSeriNo].servis_adi = servisAdi;
+      guncel[temizSeriNo].telefon = telefon;
+      guncel[temizSeriNo].cihaz_model = cihazModel;
+    } else {
+      guncel[temizSeriNo] = {
+        servis_adi: servisAdi,
+        telefon: telefon,
+        cihaz_model: cihazModel,
+        islemler: [yeniIslem]
+      };
+    }
 
-    // KAREKOD ARTIK DİREKT LİNKE GÖNDERECEK
+    setServisVerisi(guncel);
+    await veriyiGisteKaydet(guncel);
+    setLoading(false);
+
+    // Karekod artık internet ortamında her yerden sorgulanabilecek ortak linki içeriyor
     const qrIcerik = `https://omerfarukkizilayoses-pixel.github.io/sdh-teknik-servis/?serino=${temizSeriNo}`;
     setSonUretilenQR(qrIcerik);
-    alert(`${temizSeriNo} başarıyla kaydedildi!`);
+    alert(`${temizSeriNo} başarıyla ortak bulut veritabanına eklendi!`);
+    
+    // İşlem girdilerini sıfırla
+    setYapilanIslem('');
+    setDegisenParcalar('');
   };
 
   const handleSorgula = (val) => {
@@ -114,7 +170,8 @@ function App() {
 
   // --- DİNAMİK RESPONSIVE SAF CSS STİLLERİ ---
   const styles = {
-    container: { padding: isMobile ? '10px' : '30px', maxWidth: '1200px', margin: '0 auto', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#f4f6f9', minHeight: '100vh', boxSizing: 'border-box' },
+    container: { padding: isMobile ? '10px' : '30px', maxWidth: '1200px', margin: '0 auto', fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#f4f6f9', minHeight: '100vh', boxSizing: 'border-box', position: 'relative' },
+    loadingOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 9999, flexDirection: 'column', gap: '12px' },
     headerBox: { background: 'linear-gradient(135deg, #0052D4, #4364F7)', padding: isMobile ? '15px' : '30px', borderRadius: '16px', color: 'white', textAlign: 'center', marginBottom: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.08)' },
     h1: { margin: 0, fontSize: isMobile ? '20px' : '32px', fontWeight: '800', letterSpacing: '0.5px' },
     pSub: { margin: '6px 0 0 0', fontSize: isMobile ? '11px' : '14px', tracking: '2px', opacity: 0.85, fontWeight: '300' },
@@ -136,16 +193,24 @@ function App() {
 
   return (
     <div style={styles.container}>
+      {/* BULUT SENKRONİZASYON PERDESİ */}
+      {loading && (
+        <div style={styles.loadingOverlay}>
+          <Loader2 className="animate-spin" size={42} color="#4364F7" />
+          <span style={{ fontSize: '14px', fontWeight: '700', color: '#4364F7', letterSpacing: '0.5px' }}>Ortak Bulut Veritabanı Bağlanıyor...</span>
+        </div>
+      )}
+
       {/* BAŞLIK PANELİ */}
       <div style={styles.headerBox}>
         <h1 style={styles.h1}>🏥 SORGUN DEVLET HASTANESİ</h1>
-        <p style={styles.pSub}>BİLGİSAYAR TEKNİK BAKIM ONARIM WEB SİSTEMİ</p>
+        <p style={styles.pSub}>BİLGİSAYAR TEKNİK BAKIM ONARIM BULUT SİSTEMİ</p>
       </div>
 
       {/* İSTATİSTİK KARTLARI */}
       <div style={styles.statsGrid}>
         <div style={styles.card('linear-gradient(135deg, #1e293b, #0f172a)')}>
-          <div><h3 style={{ margin: 0, fontSize: '26px', fontWeight: '800' }}>{toplamCihaz}</h3><p style={{ margin: 0, fontSize: '12px', opacity: 0.75, marginTop: '2px' }}>Sistemde Kayıtlı Cihaz</p></div>
+          <div><h3 style={{ margin: 0, fontSize: '26px', fontWeight: '800' }}>{toplamCihaz}</h3><p style={{ margin: 0, fontSize: '12px', opacity: 0.75, marginTop: '2px' }}>Bulutta Kayıtlı Toplam Cihaz</p></div>
           <Wrench style={{ opacity: 0.25, width: '32px', height: '32px' }} />
         </div>
         <div style={styles.card('linear-gradient(135deg, #059669, #10b981)')}>
@@ -153,7 +218,7 @@ function App() {
           <CheckCircle style={{ opacity: 0.25, width: '32px', height: '32px' }} />
         </div>
         <div style={styles.card('linear-gradient(135deg, #3b82f6, #1d4ed8)')}>
-          <div><h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700' }}>{isMobile ? 'MOBİL MOD' : 'MASAÜSTÜ MOD'}</h3><p style={{ margin: 0, fontSize: '12px', opacity: 0.75, marginTop: '2px' }}>Cihaz Hafızası Aktif</p></div>
+          <div><h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700' }}>BULUT AKTİF</h3><p style={{ margin: 0, fontSize: '12px', opacity: 0.75, marginTop: '2px' }}>Her Cihazdan Erişim</p></div>
           <Calendar style={{ opacity: 0.25, width: '32px', height: '32px' }} />
         </div>
       </div>
@@ -164,7 +229,7 @@ function App() {
           <button onClick={() => setActiveTab('ekle')} style={styles.tabButton(activeTab === 'ekle')}>
             <PlusCircle size={16} /> YENİ TEKNİK RAPOR EKLE
           </button>
-          <button onClick={() => setActiveTab('sorgula')} style={styles.tabButton(activeTab === 'sorgula')}>
+          <button onClick={() => { setActiveTab('sorgula'); verileriGisttenCek(); }} style={styles.tabButton(activeTab === 'sorgula')}>
             <Search size={16} /> KAREKOD / SERİ NO SORGULA
           </button>
         </div>
@@ -180,7 +245,7 @@ function App() {
                     <input type="text" style={styles.input} value={servisAdi} onChange={e => setServisAdi(e.target.value)} placeholder="Örn: Acil Servis, Laboratuvar" required />
                   </div>
                   <div style={styles.formGroup}>
-                    <label style={styles.label}>CİHAZ TÜRÜ / MARKA / MODEL</label>
+                    <label style style={styles.label}>CİHAZ TÜRÜ / MARKA / MODEL</label>
                     <input type="text" style={styles.input} value={cihazModel} onChange={e => setCihazModel(e.target.value)} placeholder="Örn: Lenovo Masaüstü PC" />
                   </div>
                   <div style={styles.formGroup}>
@@ -205,7 +270,9 @@ function App() {
                 <textarea style={{ ...styles.input, height: '65px', resize: 'none' }} value={degisenParcalar} onChange={e => setDegisenParcalar(e.target.value)} placeholder="Örn: 240GB SSD" />
               </div>
 
-              <button type="submit" style={styles.button}>💾 Raporu Kaydet ve Karekod Üret</button>
+              <button type="submit" disabled={loading} style={styles.button}>
+                {loading ? '⏳ Buluta Yazılıyor...' : '💾 Raporu Buluta Kaydet ve Karekod Üret'}
+              </button>
 
               {sonUretilenQR && (
                 <div style={styles.qrBox}>
@@ -214,7 +281,7 @@ function App() {
                   </div>
                   <div style={{ textAlign: isMobile ? 'center' : 'left' }}>
                     <h4 style={{ margin: '0 0 4px 0', color: '#1e293b', fontWeight: '700' }}>Karekod Başarıyla Üretildi</h4>
-                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', maxWidth: '340px', lineHeight: '1.4' }}>Barkod veya etiket yazıcısından çıktı alarak doğrudan cihazın üzerine yapıştırabilirsiniz.</p>
+                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', maxWidth: '340px', lineHeight: '1.4' }}>Barkod etiket yazıcısından çıktı alarak doğrudan cihazın üzerine yapıştırabilirsiniz.</p>
                     {telefon && (
                       <a href={`https://wa.me/${telefon}?text=${encodeURIComponent(`Sorgun DH Teknik Servis:\n\n${servisAdi} birimine ait cihazınızın bakımı tamamlanmıştır.\nİşlem: ${yapilanIslem}`)}`} target="_blank" rel="noreferrer" style={styles.wpButton}>
                         <MessageSquare size={15} /> WhatsApp Bildirimi Gönder
@@ -245,8 +312,8 @@ function App() {
                     </p>
                   </div>
 
-                  <h3 style={{ fontSize: '14px', color: '#475569', marginBottom: '12px', fontWeight: '700' }}>⏳ Kronolojik Bakım Geçmişi</h3>
-                  {sorguSonucu.islemler.map((islem, idx) => (
+                  <h3 style={{ fontSize: '14px', color: '#475569', marginBottom: '12px', fontWeight: '700' }}>⏳ Kronolojik Bakım Geçmişi (Bulut Verisi)</h3>
+                  {sorguSonucu.islemler && sorguSonucu.islemler.map((islem, idx) => (
                     <div key={idx} style={styles.historyCard}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', paddingBottom: '6px', marginBottom: '10px' }}>
                         <span style={{ fontWeight: '700', fontSize: '13px', color: '#4364F7' }}>Müdahale #{sorguSonucu.islemler.length - idx}</span>
@@ -265,7 +332,7 @@ function App() {
                   ))}
                 </div>
               ) : (
-                sorguSeriNo && (
+                sorguSeriNo && !loading && (
                   <div style={{ textAlign: 'center', padding: '40px 10px', color: '#94a3b8' }}>
                     <ShieldAlert size={36} style={{ color: '#f59e0b', marginBottom: '10px' }} />
                     <p style={{ margin: 0, fontSize: '14px' }}>Bu seri numarasına ait bir teknik servis kaydı bulunamadı.</p>
