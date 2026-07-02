@@ -32,6 +32,25 @@ function App() {
   const [sorguSeriNo, setSorguSeriNo] = useState('');
   const [sorguSonucu, setSorguSonucu] = useState(null);
 
+  // URL'den Otomatik Karekod Sorgulama Algılayıcı (Telefon Kamerası İçin)
+  useEffect(() => {
+    const queryParams = new URLSearchParams(window.location.search);
+    const urlSeriNo = queryParams.get('serino');
+    if (urlSeriNo) {
+      const temizUrlSeriNo = urlSeriNo.toUpperCase().trim();
+      setActiveTab('sorgula');
+      setSorguSeriNo(temizUrlSeriNo);
+      
+      const lokalData = localStorage.getItem('sdh_servis_kayitlari');
+      if (lokalData) {
+        const data = JSON.parse(lokalData);
+        if (data[temizUrlSeriNo]) {
+          setSorguSonucu(data[temizUrlSeriNo]);
+        }
+      }
+    }
+  }, []);
+
   useEffect(() => {
     localStorage.setItem('sdh_servis_kayitlari', JSON.stringify(servisVerisi));
   }, [servisVerisi]);
@@ -77,7 +96,8 @@ function App() {
       return guncel;
     });
 
-    const qrIcerik = `SORGUN DH\nDEMIRBAS: ${temizSeriNo}\nBirim: ${servisAdi}\nModel: ${cihazModel}\nSon Islem: ${yapilanIslem}`;
+    // KAREKOD ARTIK DİREKT LİNKE GÖNDERECEK
+    const qrIcerik = `https://omerfarukkizilayoses-pixel.github.io/sdh-teknik-servis/?serino=${temizSeriNo}`;
     setSonUretilenQR(qrIcerik);
     alert(`${temizSeriNo} başarıyla kaydedildi!`);
   };
@@ -98,7 +118,7 @@ function App() {
     headerBox: { background: 'linear-gradient(135deg, #0052D4, #4364F7)', padding: isMobile ? '15px' : '30px', borderRadius: '16px', color: 'white', textAlign: 'center', marginBottom: '20px', boxShadow: '0 4px 15px rgba(0,0,0,0.08)' },
     h1: { margin: 0, fontSize: isMobile ? '20px' : '32px', fontWeight: '800', letterSpacing: '0.5px' },
     pSub: { margin: '6px 0 0 0', fontSize: isMobile ? '11px' : '14px', tracking: '2px', opacity: 0.85, fontWeight: '300' },
-    statsGrid: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, ' + '1fr)', gap: '15px', marginBottom: '25px' },
+    statsGrid: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '15px', marginBottom: '25px' },
     card: (bg) => ({ background: bg, padding: '20px', borderRadius: '14px', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.04)' }),
     tabContainer: { backgroundColor: 'white', borderRadius: '14px', boxShadow: '0 4px 20px rgba(0,0,0,0.03)', overflow: 'hidden', border: '1px solid #e2e8f0' },
     tabHeader: { display: 'flex', backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', flexDirection: isMobile ? 'column' : 'row' },
